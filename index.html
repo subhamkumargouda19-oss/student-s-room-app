@@ -1,1 +1,1653 @@
-subham 
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, collection, addDoc, onSnapshot, 
+  doc, deleteDoc, updateDoc, query, where, setDoc, getDoc, writeBatch, getDocs, orderBy 
+} from 'firebase/firestore';
+import { 
+  getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken 
+} from 'firebase/auth';
+import { 
+  Users, Trash2, ShoppingCart, DollarSign, 
+  Calendar, Home, Plus, X, Phone, User, LogOut, KeyRound,
+  ShieldCheck, Clock, Check, Ban, AlertTriangle, MessageSquare, 
+  Send, Smartphone, Utensils, Bell, AlarmClock, Calculator, ChevronLeft, Mail, History, FileText
+} from 'lucide-react';
+
+// --- Firebase Configuration & Initialization ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-room-app';
+
+// --- Components ---
+
+// 0. Confirm Modal
+const ConfirmModal = ({ isOpen, title, message, onConfirm, onCancel }) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl animate-in fade-in zoom-in duration-200">
+        <div className="flex flex-col items-center text-center">
+          <div className="bg-red-100 p-3 rounded-full mb-4">
+            <AlertTriangle className="text-red-600" size={32} />
+          </div>
+          <h3 className="text-xl font-bold text-gray-900 mb-2">{title}</h3>
+          <p className="text-gray-500 mb-6">{message}</p>
+          <div className="flex gap-3 w-full">
+            <button 
+              onClick={onCancel}
+              className="flex-1 py-3 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition-colors"
+            >
+              Cancel
+            </button>
+            <button 
+              onClick={onConfirm}
+              className="flex-1 py-3 px-4 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl shadow-lg shadow-red-200 transition-colors"
+            >
+              Yes, Clear & Archive
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// 0.3 History Modal
+const HistoryModal = ({ isOpen, onClose, historyItems, title, type }) => {
+  const [selectedRecord, setSelectedRecord] = useState(null);
+
+  if (!isOpen) return null;
+
+  // Render detail view of a specific past record
+  if (selectedRecord) {
+    return (
+      <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl h-[500px] flex flex-col">
+           <div className="flex items-center gap-3 mb-4">
+             <button 
+               onClick={() => setSelectedRecord(null)} 
+               className="p-1 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors"
+             >
+               <ChevronLeft size={24} />
+             </button>
+             <div>
+                <h3 className="text-lg font-bold text-gray-800">Archive Details</h3>
+                <p className="text-xs text-gray-500">{new Date(selectedRecord.archivedAt).toLocaleString()}</p>
+             </div>
+           </div>
+
+           <div className="flex-1 overflow-y-auto space-y-2 border-t border-gray-100 pt-4">
+              {type === 'expenses' && (
+                  <>
+                    <div className="bg-emerald-50 p-3 rounded-lg mb-4 text-center">
+                        <p className="text-xs text-emerald-600 font-bold uppercase">Total Archived Amount</p>
+                        <p className="text-2xl font-bold text-emerald-800">₹{selectedRecord.total}</p>
+                    </div>
+                    {selectedRecord.items.map((item, idx) => (
+                        <div key={idx} className="flex justify-between p-2 bg-gray-50 rounded border border-gray-100 text-sm">
+                            <span>{item.description} <span className="text-gray-400 text-xs">({item.paidBy})</span></span>
+                            <span className="font-bold">₹{item.amount}</span>
+                        </div>
+                    ))}
+                  </>
+              )}
+
+              {type === 'tasks' && (
+                  <>
+                    <p className="text-xs text-center text-gray-400 mb-2">{selectedRecord.items.length} Tasks Completed</p>
+                    {selectedRecord.items.map((item, idx) => (
+                        <div key={idx} className="flex justify-between p-2 bg-gray-50 rounded border border-gray-100 text-sm">
+                            <span className="flex items-center gap-2">
+                                {item.type === 'veg' && <span className="text-xs bg-green-100 text-green-700 px-1 rounded">Veg</span>}
+                                {item.type === 'garbage' && <span className="text-xs bg-red-100 text-red-700 px-1 rounded">Bin</span>}
+                                {item.type === 'cooking' && <span className="text-xs bg-orange-100 text-orange-700 px-1 rounded">Cook</span>}
+                                {item.title}
+                            </span>
+                            {item.assignee && <span className="text-xs text-gray-500 bg-white px-1 border rounded">{item.assignee}</span>}
+                        </div>
+                    ))}
+                  </>
+              )}
+           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Render List of Archives
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl h-[500px] flex flex-col">
+        <div className="flex justify-between items-center mb-6">
+           <h3 className="text-xl font-bold flex items-center gap-2 text-gray-800">
+             <History className="text-indigo-600"/> {title}
+           </h3>
+           <button onClick={onClose}><X size={20} className="text-gray-400 hover:text-gray-600"/></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto space-y-3">
+            {historyItems.length === 0 && (
+                <div className="text-center text-gray-400 mt-20">
+                    <History size={48} className="mx-auto mb-2 opacity-20"/>
+                    <p>No history records found.</p>
+                </div>
+            )}
+            {historyItems.map((record) => (
+                <button 
+                    key={record.id}
+                    onClick={() => setSelectedRecord(record)}
+                    className="w-full text-left bg-white border border-gray-200 p-4 rounded-xl hover:border-indigo-300 hover:shadow-md transition-all group"
+                >
+                    <div className="flex justify-between items-start mb-1">
+                        <span className="font-bold text-gray-700 group-hover:text-indigo-700">
+                            {new Date(record.archivedAt).toLocaleDateString()} 
+                        </span>
+                        <span className="text-xs text-gray-400">
+                            {new Date(record.archivedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                        </span>
+                    </div>
+                    <div className="flex justify-between text-sm text-gray-500">
+                        <span>{record.items.length} items</span>
+                        {type === 'expenses' && <span className="font-bold text-emerald-600">Total: ₹{record.total}</span>}
+                    </div>
+                </button>
+            ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// 0.1 SMS Selection Modal
+const SMSModal = ({ isOpen, onClose, members, messageBody, preSelectedPhone }) => {
+  if (!isOpen) return null;
+
+  const handleSend = (phone) => {
+    if (!phone) return;
+    const cleanPhone = phone.replace(/\D/g, '');
+    const smsUrl = `sms:${cleanPhone}?body=${encodeURIComponent(messageBody)}`;
+    window.open(smsUrl, '_blank');
+  };
+  
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+        <div className="flex justify-between items-center mb-4">
+           <h3 className="text-lg font-bold flex items-center gap-2"><Smartphone size={20}/> Send via SMS</h3>
+           <button onClick={onClose}><X size={20} className="text-gray-400"/></button>
+        </div>
+        <p className="text-sm text-gray-500 mb-4">
+            {preSelectedPhone 
+                ? "Send reminder to assignee:" 
+                : "Select a roommate to send this message to:"}
+        </p>
+        
+        <div className="space-y-2 max-h-60 overflow-y-auto">
+          {members.filter(m => m.phone).length === 0 && (
+             <p className="text-center text-red-400 text-sm">No roommates have phone numbers added.</p>
+          )}
+          
+          {members
+            .filter(m => m.phone && (!preSelectedPhone || m.phone === preSelectedPhone))
+            .map(m => (
+            <button 
+              key={m.id}
+              onClick={() => handleSend(m.phone)}
+              className="w-full flex items-center justify-between p-3 bg-gray-50 hover:bg-green-50 rounded-xl transition-colors border border-gray-100"
+            >
+              <div className="flex items-center gap-3">
+                 <div className="w-8 h-8 rounded-full bg-gray-200 overflow-hidden">
+                    {m.photoUrl ? <img src={m.photoUrl} className="w-full h-full object-cover"/> : <User size={16} className="m-2 text-gray-400"/>}
+                 </div>
+                 <span className="font-medium text-gray-700">{m.name}</span>
+              </div>
+              <Send size={16} className="text-green-600"/>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// 0.2 Split Modal
+const SplitModal = ({ isOpen, onClose, total, members, spendingByMember }) => {
+  if (!isOpen) return null;
+
+  const perPerson = members.length > 0 ? total / members.length : 0;
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl animate-in slide-in-from-bottom-10">
+        <div className="flex items-center gap-3 mb-6">
+           <button 
+             onClick={onClose} 
+             className="p-1 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors"
+           >
+             <ChevronLeft size={28} />
+           </button>
+           <h3 className="text-xl font-bold flex items-center gap-2 text-gray-800">
+             <Calculator className="text-emerald-600"/> Split Breakdown
+           </h3>
+        </div>
+
+        <div className="bg-emerald-50 p-4 rounded-xl mb-6 text-center border border-emerald-100">
+            <p className="text-gray-500 text-xs uppercase font-bold tracking-wider">Per Person Share</p>
+            <p className="text-4xl font-bold text-emerald-600 my-1">₹{perPerson.toFixed(0)}</p>
+            <p className="text-xs text-gray-400">Total ₹{total} ÷ {members.length} People</p>
+        </div>
+
+        <div className="space-y-3 max-h-60 overflow-y-auto">
+            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Member Balance</h4>
+            {members.map(m => {
+                const paid = spendingByMember[m.id] || 0;
+                const balance = paid - perPerson;
+                const isOwed = balance > 0;
+                
+                return (
+                    <div key={m.id} className="flex justify-between items-center text-sm border-b border-gray-50 pb-3 last:border-0">
+                        <div className="flex items-center gap-3">
+                             <div className="w-10 h-10 rounded-full bg-gray-100 overflow-hidden border border-gray-200">
+                                {m.photoUrl ? <img src={m.photoUrl} className="w-full h-full object-cover"/> : <User size={20} className="m-2.5 text-gray-400"/>}
+                             </div>
+                             <div>
+                                <p className="font-bold text-gray-800">{m.name}</p>
+                                <p className="text-xs text-gray-400">Paid: ₹{paid.toFixed(0)}</p>
+                             </div>
+                        </div>
+                        <div className={`text-right font-bold ${isOwed ? 'text-green-600' : 'text-red-500'}`}>
+                            {Math.abs(balance) < 1 ? (
+                                <span className="text-gray-400 bg-gray-100 px-2 py-1 rounded">Settled</span>
+                            ) : (
+                                <div className="flex flex-col items-end">
+                                    <span className="text-xs font-medium text-gray-400">{isOwed ? 'Gets back' : 'Owes'}</span>
+                                    <span className="text-lg">₹{Math.abs(balance).toFixed(0)}</span>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )
+            })}
+        </div>
+        
+        <button 
+            onClick={onClose}
+            className="w-full mt-6 bg-gray-900 text-white py-3 rounded-xl font-bold hover:bg-gray-800 transition-colors"
+        >
+            Done
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// 0. Room Entry Component
+const RoomEntry = ({ onJoin, isChecking }) => {
+  const [code, setCode] = useState('');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [roomName, setRoomName] = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (code.trim().length > 0 && name.trim().length > 0 && email.trim().length > 0) {
+      onJoin(code.trim().toUpperCase(), name.trim(), email.trim(), roomName.trim());
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-indigo-600 flex items-center justify-center p-6">
+      <div className="bg-white w-full max-w-sm rounded-2xl p-8 shadow-2xl">
+        <div className="flex justify-center mb-6">
+          <div className="bg-indigo-100 p-4 rounded-full">
+            <KeyRound size={32} className="text-indigo-600" />
+          </div>
+        </div>
+        <h1 className="text-2xl font-bold text-center text-gray-800 mb-2">Roommate Sync</h1>
+        <p className="text-center text-gray-500 mb-8">Create or Join a Room</p>
+        
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Room Name</label>
+            <input 
+              type="text" 
+              value={roomName}
+              onChange={(e) => setRoomName(e.target.value)}
+              placeholder="e.g. Sunset Apt 402 (Optional if joining)"
+              className="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl text-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Your Name</label>
+            <input 
+              type="text" 
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Rahul"
+              className="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl text-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Email ID</label>
+            <input 
+              type="email" 
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="e.g. rahul@example.com"
+              className="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl text-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Room Code</label>
+            <input 
+              type="text" 
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="e.g. FLAT-101"
+              className="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl text-center text-xl font-bold tracking-widest uppercase focus:ring-2 focus:ring-indigo-500 outline-none"
+              required
+            />
+          </div>
+          <button 
+            type="submit" 
+            disabled={isChecking}
+            className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+          >
+            {isChecking ? 'Checking...' : 'Enter Room'}
+          </button>
+        </form>
+        <p className="text-xs text-center text-gray-400 mt-6">
+          * Email is required for identification.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// 0.5 Waiting Screen
+const WaitingScreen = ({ onLeave }) => (
+  <div className="min-h-screen bg-indigo-50 flex items-center justify-center p-6">
+    <div className="bg-white w-full max-w-sm rounded-2xl p-8 shadow-xl text-center">
+      <div className="flex justify-center mb-6">
+        <div className="bg-orange-100 p-4 rounded-full animate-pulse">
+          <Clock size={48} className="text-orange-500" />
+        </div>
+      </div>
+      <h2 className="text-2xl font-bold text-gray-800 mb-2">Request Sent</h2>
+      <p className="text-gray-500 mb-6">Waiting for the Room Manager to approve your request. Please check back shortly.</p>
+      <button 
+        onClick={onLeave}
+        className="text-indigo-600 font-medium hover:underline flex items-center justify-center gap-2 mx-auto"
+      >
+        <LogOut size={16} /> Cancel & Go Back
+      </button>
+    </div>
+  </div>
+);
+
+// 1. Members Component
+const Members = ({ members, requests, isManager, onAddMember, onDeleteMember, onApproveRequest, onRejectRequest }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [newMember, setNewMember] = useState({ name: '', phone: '', email: '', photoUrl: '' });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!newMember.name) return;
+    onAddMember(newMember);
+    setNewMember({ name: '', phone: '', email: '', photoUrl: '' });
+    setIsOpen(false);
+  };
+
+  return (
+    <div className="space-y-6 pb-20">
+      
+      {/* Pending Requests (Manager Only) */}
+      {isManager && requests.length > 0 && (
+        <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
+          <h3 className="text-sm font-bold text-orange-800 uppercase tracking-wide mb-3 flex items-center gap-2">
+            <ShieldCheck size={16} /> Pending Approvals
+          </h3>
+          <div className="space-y-2">
+            {requests.map(req => (
+              <div key={req.id} className="bg-white p-3 rounded-lg shadow-sm flex flex-col gap-2">
+                <div className="flex justify-between items-center">
+                    <span className="font-medium text-gray-800">{req.userName}</span>
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={() => onRejectRequest(req.id)}
+                            className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200"
+                        >
+                            <Ban size={16} />
+                        </button>
+                        <button 
+                            onClick={() => onApproveRequest(req)}
+                            className="p-2 bg-green-100 text-green-600 rounded-lg hover:bg-green-200"
+                        >
+                            <Check size={16} />
+                        </button>
+                    </div>
+                </div>
+                {req.userEmail && <span className="text-xs text-gray-500 flex items-center gap-1"><Mail size={12}/> {req.userEmail}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="flex justify-between items-center mb-2">
+        <h2 className="text-2xl font-bold text-gray-800">Roommates</h2>
+        <button 
+          onClick={() => setIsOpen(true)}
+          className="bg-indigo-600 text-white px-4 py-2 rounded-full flex items-center shadow-lg hover:bg-indigo-700"
+        >
+          <Plus size={18} className="mr-1" /> Add
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {members.map(member => (
+          <div key={member.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center relative group">
+             {isManager && (
+               <button 
+                  onClick={() => onDeleteMember(member.id)}
+                  className="absolute top-2 right-2 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <X size={16} />
+                </button>
+             )}
+            <div className="h-16 w-16 rounded-full bg-gray-200 overflow-hidden flex-shrink-0 border-2 border-indigo-100">
+              {member.photoUrl ? (
+                <img src={member.photoUrl} alt={member.name} className="h-full w-full object-cover" />
+              ) : (
+                <div className="h-full w-full flex items-center justify-center text-gray-400">
+                  <User size={32} />
+                </div>
+              )}
+            </div>
+            <div className="ml-4 overflow-hidden">
+              <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+                {member.name}
+                {member.isManager && <ShieldCheck size={16} className="text-indigo-500" />}
+              </h3>
+              {member.phone && (
+                <a href={`tel:${member.phone}`} className="text-sm text-gray-500 flex items-center mt-1 hover:text-indigo-600">
+                  <Phone size={14} className="mr-1" /> {member.phone}
+                </a>
+              )}
+              {member.email && (
+                <a href={`mailto:${member.email}`} className="text-sm text-gray-500 flex items-center mt-1 truncate hover:text-indigo-600">
+                  <Mail size={14} className="mr-1" /> {member.email}
+                </a>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {isOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+            <h3 className="text-xl font-bold mb-4">Add Roommate</h3>
+            <form onSubmit={handleSubmit} className="space-y-3">
+              <input 
+                type="text" 
+                placeholder="Name" 
+                className="w-full p-3 border rounded-lg"
+                value={newMember.name}
+                onChange={e => setNewMember({...newMember, name: e.target.value})}
+              />
+              <input 
+                type="email" 
+                placeholder="Email" 
+                className="w-full p-3 border rounded-lg"
+                value={newMember.email}
+                onChange={e => setNewMember({...newMember, email: e.target.value})}
+              />
+              <input 
+                type="tel" 
+                placeholder="Phone Number" 
+                className="w-full p-3 border rounded-lg"
+                value={newMember.phone}
+                onChange={e => setNewMember({...newMember, phone: e.target.value})}
+              />
+              <input 
+                type="text" 
+                placeholder="Photo URL (Optional)" 
+                className="w-full p-3 border rounded-lg"
+                value={newMember.photoUrl}
+                onChange={e => setNewMember({...newMember, photoUrl: e.target.value})}
+              />
+              <div className="flex justify-end gap-2 mt-4">
+                <button type="button" onClick={() => setIsOpen(false)} className="px-4 py-2 text-gray-600">Cancel</button>
+                <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg">Save</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// 2. Expenses Component
+const Expenses = ({ expenses, history, members, isManager, onAddExpense, onDeleteExpense, onClearExpenses }) => {
+  const [amount, setAmount] = useState('');
+  const [desc, setDesc] = useState('');
+  const [paidBy, setPaidBy] = useState('');
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [isSplitOpen, setIsSplitOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+
+  const totalSpent = useMemo(() => expenses.reduce((acc, curr) => acc + Number(curr.amount), 0), [expenses]);
+  
+  const sortedExpenses = useMemo(() => {
+    return [...expenses].sort((a, b) => new Date(b.date) - new Date(a.date));
+  }, [expenses]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!amount || !desc || !paidBy) return;
+    onAddExpense({ amount: Number(amount), description: desc, paidBy, date: new Date().toISOString() });
+    setAmount('');
+    setDesc('');
+  };
+
+  const spendingByMember = useMemo(() => {
+    const stats = {};
+    members.forEach(m => stats[m.id] = 0);
+    expenses.forEach(e => {
+      if (stats[e.paidBy] !== undefined) stats[e.paidBy] += Number(e.amount);
+    });
+    return stats;
+  }, [expenses, members]);
+
+  return (
+    <div className="space-y-6 pb-20">
+      <div className="bg-emerald-600 text-white p-6 rounded-2xl shadow-lg relative overflow-hidden">
+        <div className="relative z-10">
+            <p className="text-emerald-100 text-sm font-medium">Total House Expenses</p>
+            <h2 className="text-4xl font-bold mt-1">₹{totalSpent.toFixed(2)}</h2>
+            
+            <button 
+                onClick={() => setIsSplitOpen(true)}
+                className="mt-4 bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors border border-white/20"
+            >
+                <Calculator size={16}/> Split Bill
+            </button>
+        </div>
+        <div className="absolute -right-6 -bottom-6 opacity-20 transform rotate-12">
+            <DollarSign size={150} />
+        </div>
+      </div>
+
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+        <h3 className="font-bold text-gray-800 mb-3">Add Expense</h3>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          <input 
+            type="text" placeholder="Description (e.g. Electricity)" 
+            value={desc} onChange={e => setDesc(e.target.value)}
+            className="p-2 border rounded-lg"
+          />
+          <div className="flex gap-2">
+            <input 
+              type="number" placeholder="Amount (₹)" 
+              value={amount} onChange={e => setAmount(e.target.value)}
+              className="p-2 border rounded-lg w-1/3"
+            />
+            <select 
+              value={paidBy} onChange={e => setPaidBy(e.target.value)}
+              className="p-2 border rounded-lg w-2/3"
+            >
+              <option value="">Paid By...</option>
+              {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </div>
+          <button type="submit" className="bg-emerald-600 text-white py-2 rounded-lg font-medium hover:bg-emerald-700">Add Record</button>
+        </form>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        {members.map(m => (
+          <div key={m.id} className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+            <p className="text-xs text-gray-500">{m.name} Paid</p>
+            <p className="font-bold text-gray-800">₹{(spendingByMember[m.id] || 0).toFixed(2)}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex justify-between items-center">
+            <div className="flex items-center gap-2">
+               <h3 className="font-bold text-gray-800">Recent History</h3>
+               <button 
+                 onClick={() => setIsHistoryOpen(true)}
+                 className="p-1 text-gray-400 hover:text-emerald-600 transition-colors"
+                 title="View Past Archives"
+               >
+                 <History size={18}/>
+               </button>
+            </div>
+            {isManager && expenses.length > 0 && (
+                <button 
+                  onClick={() => setShowClearConfirm(true)}
+                  className="text-xs font-bold text-red-500 hover:text-red-700 bg-red-50 px-3 py-1 rounded-full border border-red-100"
+                >
+                  Clear & Archive
+                </button>
+            )}
+        </div>
+        
+        {sortedExpenses.length === 0 && <p className="text-gray-400 text-sm italic">No expenses recorded yet.</p>}
+        {sortedExpenses.map(exp => {
+           const payerName = members.find(m => m.id === exp.paidBy)?.name || 'Unknown';
+           return (
+            <div key={exp.id} className="flex justify-between items-center bg-white p-3 rounded-lg shadow-sm border-l-4 border-emerald-500">
+              <div>
+                <p className="font-medium text-gray-900">{exp.description}</p>
+                <p className="text-xs text-gray-500">Paid by {payerName}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-gray-800">₹{exp.amount}</span>
+                <button onClick={() => onDeleteExpense(exp.id)} className="text-gray-300 hover:text-red-500"><X size={14}/></button>
+              </div>
+            </div>
+           );
+        })}
+      </div>
+
+      <ConfirmModal 
+        isOpen={showClearConfirm}
+        title="Clear All Expenses?"
+        message="This will save the current list to History and then clear it. This allows you to start fresh for a new month."
+        onCancel={() => setShowClearConfirm(false)}
+        onConfirm={() => {
+            onClearExpenses();
+            setShowClearConfirm(false);
+        }}
+      />
+
+      <SplitModal 
+        isOpen={isSplitOpen}
+        onClose={() => setIsSplitOpen(false)}
+        total={totalSpent}
+        members={members}
+        spendingByMember={spendingByMember}
+      />
+
+      <HistoryModal 
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        historyItems={history}
+        title="Expense History"
+        type="expenses"
+      />
+    </div>
+  );
+};
+
+// 2.5 Notice Board Component
+const NoticeBoard = ({ notices, members, onAddNotice, onDeleteNotice }) => {
+  const [text, setText] = useState('');
+  const [date, setDate] = useState('');
+  const [smsModalOpen, setSmsModalOpen] = useState(false);
+  const [selectedNoticeBody, setSelectedNoticeBody] = useState('');
+
+  const handleAdd = (e) => {
+    e.preventDefault();
+    if(!text) return;
+    onAddNotice({
+        content: text,
+        targetDate: date,
+        createdAt: new Date().toISOString()
+    });
+    setText('');
+    setDate('');
+  };
+
+  const handleSMSClick = (notice) => {
+    let body = `IMPORTANT: ${notice.content}`;
+    if (notice.targetDate) body += ` (Date: ${notice.targetDate})`;
+    setSelectedNoticeBody(body);
+    setSmsModalOpen(true);
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
+       <div className="flex items-center gap-2 mb-3 text-indigo-600">
+           <MessageSquare size={20} />
+           <h3 className="font-bold text-lg">Important Notices</h3>
+       </div>
+
+       <form onSubmit={handleAdd} className="flex flex-col gap-2 mb-4 bg-indigo-50 p-3 rounded-lg">
+           <textarea 
+             placeholder="Post an announcement..." 
+             className="w-full p-2 border rounded-lg text-sm bg-white h-16 resize-none"
+             value={text}
+             onChange={e => setText(e.target.value)}
+           />
+           <div className="flex gap-2">
+             <input 
+               type="date" 
+               className="p-2 border rounded-lg text-sm bg-white"
+               value={date}
+               onChange={e => setDate(e.target.value)}
+             />
+             <button type="submit" className="flex-1 bg-indigo-600 text-white py-2 rounded-lg text-sm font-bold flex justify-center items-center gap-2">
+                Post <Send size={14}/>
+             </button>
+           </div>
+       </form>
+
+       <div className="space-y-3">
+          {notices.map(notice => (
+             <div key={notice.id} className="bg-white border-l-4 border-indigo-500 p-3 rounded shadow-sm relative">
+                <button 
+                   onClick={() => onDeleteNotice(notice.id)}
+                   className="absolute top-2 right-2 text-gray-300 hover:text-red-500"
+                >
+                   <X size={14} />
+                </button>
+                <p className="font-medium text-gray-800 pr-6">{notice.content}</p>
+                
+                <div className="flex flex-wrap items-center gap-2 mt-2">
+                    {notice.targetDate && (
+                        <span className="text-xs font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <Calendar size={10} /> {notice.targetDate}
+                        </span>
+                    )}
+                    <button 
+                      onClick={() => handleSMSClick(notice)}
+                      className="text-xs font-bold bg-green-100 text-green-700 px-2 py-0.5 rounded-full flex items-center gap-1 hover:bg-green-200"
+                    >
+                        <Smartphone size={10} /> SMS
+                    </button>
+                </div>
+             </div>
+          ))}
+          {notices.length === 0 && <p className="text-center text-gray-400 text-xs italic">No active notices.</p>}
+       </div>
+
+       <SMSModal 
+         isOpen={smsModalOpen}
+         onClose={() => setSmsModalOpen(false)}
+         members={members}
+         messageBody={selectedNoticeBody}
+       />
+    </div>
+  );
+};
+
+// 2.7 Alarm Clock Component
+const WakeUpAlarm = ({ alarmTime, onSetAlarm, members }) => {
+    const [time, setTime] = useState(alarmTime || '');
+    const [now, setNow] = useState(new Date());
+
+    useEffect(() => {
+        const timer = setInterval(() => setNow(new Date()), 1000);
+        return () => clearInterval(timer);
+    }, []);
+
+    const isAlarmTriggered = useMemo(() => {
+        if (!alarmTime) return false;
+        const [h, m] = alarmTime.split(':').map(Number);
+        return now.getHours() === h && now.getMinutes() === m && now.getSeconds() < 10;
+    }, [now, alarmTime]);
+
+    // Play sound if triggered
+    useEffect(() => {
+        if (isAlarmTriggered) {
+             const audio = new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');
+             audio.play().catch(e => console.log("Audio play failed (user interaction needed)", e));
+        }
+    }, [isAlarmTriggered]);
+
+    const handleWakeUpAll = () => {
+        const phones = members.map(m => m.phone).filter(p => p).map(p => p.replace(/\D/g, '')).join(',');
+        if (phones.length === 0) {
+            alert("No phone numbers available.");
+            return;
+        }
+        const body = encodeURIComponent("WAKE UP! It's time to get up! ☀️");
+        window.open(`sms:${phones}?body=${body}`, '_blank');
+    };
+
+    return (
+        <div className={`p-4 rounded-xl shadow-sm border mb-6 transition-colors duration-500 ${isAlarmTriggered ? 'bg-red-500 border-red-600 animate-pulse' : 'bg-blue-600 border-blue-700'}`}>
+            <div className="flex justify-between items-start text-white mb-2">
+                <div className="flex items-center gap-2">
+                    <AlarmClock size={24} className={isAlarmTriggered ? 'animate-bounce' : ''}/>
+                    <h3 className="font-bold text-lg">House Alarm</h3>
+                </div>
+                <div className="text-right">
+                    <p className="text-3xl font-mono font-bold leading-none">{now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                </div>
+            </div>
+
+            <div className="flex gap-2 items-end">
+                <div className="flex-1">
+                    <label className="text-xs text-blue-200 block mb-1">Set Wake Up Time</label>
+                    <input 
+                        type="time" 
+                        value={time}
+                        onChange={(e) => {
+                            setTime(e.target.value);
+                            onSetAlarm(e.target.value);
+                        }}
+                        className="w-full p-2 rounded text-gray-800 text-sm font-bold bg-white/90 border-none focus:ring-2 focus:ring-white"
+                    />
+                </div>
+                <button 
+                    onClick={handleWakeUpAll}
+                    className="bg-yellow-400 text-yellow-900 px-4 py-2 rounded font-bold shadow-lg hover:bg-yellow-300 flex items-center gap-2 h-9"
+                >
+                    <Smartphone size={16}/> Wake Up Roomies!
+                </button>
+            </div>
+        </div>
+    );
+};
+
+// 3. Tasks & Rent
+const Tasks = ({ tasks, history, notices, members, isManager, onAddTask, onDeleteTask, rentDate, onUpdateRentDate, onClearTasks, onAddNotice, onDeleteNotice, alarmTime, onSetAlarm }) => {
+  const [newItem, setNewItem] = useState('');
+  const [taskType, setTaskType] = useState('veg'); 
+  const [assignee, setAssignee] = useState('');
+  const [price, setPrice] = useState('');
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  
+  // Notification States
+  const [smsModalOpen, setSmsModalOpen] = useState(false);
+  const [notifyMsg, setNotifyMsg] = useState('');
+  const [notifyPhone, setNotifyPhone] = useState('');
+
+  const handleAdd = (e) => {
+    e.preventDefault();
+    if (!newItem) return;
+    
+    const taskData = { 
+        title: newItem, 
+        type: taskType, 
+        assignee, 
+        createdAt: new Date().toISOString() 
+    };
+    
+    if (taskType === 'veg' && price) {
+        taskData.price = price;
+    }
+
+    onAddTask(taskData);
+    setNewItem('');
+    setPrice(''); 
+  };
+
+  const handleNotify = (task) => {
+     if (!task.assignee) return;
+     const member = members.find(m => m.name === task.assignee);
+     const phone = member ? member.phone : null;
+     
+     const msg = `Reminder: You have a ${task.type === 'cooking' ? 'Cooking' : 'Garbage'} duty - "${task.title}". Please complete it!`;
+     
+     setNotifyMsg(msg);
+     setNotifyPhone(phone);
+     setSmsModalOpen(true);
+  };
+
+  const vegTasks = tasks.filter(t => t.type === 'veg');
+  const garbageTasks = tasks.filter(t => t.type === 'garbage');
+  const cookingTasks = tasks.filter(t => t.type === 'cooking');
+
+  const daysUntilRent = useMemo(() => {
+    if (!rentDate) return null;
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth();
+    
+    let due = new Date(currentYear, currentMonth, parseInt(rentDate));
+    if (due < today) {
+      due = new Date(currentYear, currentMonth + 1, parseInt(rentDate));
+    }
+
+    const diffTime = Math.abs(due - today);
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+  }, [rentDate]);
+
+  return (
+    <div className="space-y-6 pb-20">
+      
+      <WakeUpAlarm 
+        alarmTime={alarmTime} 
+        onSetAlarm={onSetAlarm}
+        members={members}
+      />
+
+      {/* Notice Board */}
+      <NoticeBoard 
+        notices={notices}
+        members={members}
+        onAddNotice={onAddNotice}
+        onDeleteNotice={onDeleteNotice}
+      />
+
+      <div className="bg-gradient-to-r from-orange-500 to-pink-500 p-6 rounded-2xl text-white shadow-lg relative overflow-hidden">
+        <div className="relative z-10">
+          <div className="flex justify-between items-start">
+             <div>
+                <h2 className="text-2xl font-bold">Rent Reminder</h2>
+                <p className="text-white/80 text-sm">Don't forget to pay!</p>
+             </div>
+             <Calendar className="text-white/30" size={48} />
+          </div>
+          
+          <div className="mt-4 flex items-end gap-2">
+            <span className="text-5xl font-bold">{daysUntilRent !== null ? daysUntilRent : '--'}</span>
+            <span className="text-lg mb-2">days left</span>
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-white/20">
+            <label className="text-xs text-white/80 block mb-1">Set Due Day (1-31):</label>
+            <input 
+              type="number" 
+              min="1" max="31"
+              value={rentDate || ''}
+              onChange={(e) => onUpdateRentDate(e.target.value)}
+              disabled={!isManager}
+              className="bg-white/20 border-none text-white placeholder-white/50 rounded px-2 py-1 w-20 text-sm focus:ring-2 focus:ring-white disabled:opacity-50"
+            />
+            {!isManager && <span className="text-xs ml-2 text-white/60">(Admin Only)</span>}
+          </div>
+        </div>
+      </div>
+
+      {/* Cooking Section */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+        <div className="flex items-center gap-2 mb-3 text-orange-500">
+           <Utensils size={20} />
+           <h3 className="font-bold text-lg">Cooking Duty</h3>
+        </div>
+        
+        <form onSubmit={handleAdd} className="flex gap-2 mb-4">
+            <input 
+              placeholder="Breakfast/Dinner?" 
+              value={newItem} 
+              onChange={e => {setNewItem(e.target.value); setTaskType('cooking');}}
+              className="flex-1 p-2 border rounded-lg text-sm"
+              onFocus={() => setTaskType('cooking')}
+            />
+            <select 
+                value={assignee} onChange={e => setAssignee(e.target.value)}
+                className="w-24 p-2 border rounded-lg text-sm"
+            >
+                <option value="">Who?</option>
+                {members.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+            </select>
+            <button type="submit" onClick={() => setTaskType('cooking')} className="bg-orange-500 text-white p-2 rounded-lg">
+                <Plus size={20}/>
+            </button>
+        </form>
+
+        <div className="space-y-2">
+            {cookingTasks.map(task => (
+                <div key={task.id} className="flex justify-between items-center bg-orange-50 p-3 rounded text-orange-900 text-sm">
+                    <div className="flex flex-col">
+                        <span className="font-medium">{task.title}</span>
+                        {task.assignee && <span className="text-xs text-orange-600">Chef: {task.assignee}</span>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                         {task.assignee && (
+                            <button onClick={() => handleNotify(task)} className="text-orange-400 hover:text-orange-600 bg-white p-1 rounded-full shadow-sm">
+                                <Bell size={14}/>
+                            </button>
+                         )}
+                        <button onClick={() => onDeleteTask(task.id)} className="text-orange-300 hover:text-orange-600"><X size={16}/></button>
+                    </div>
+                </div>
+            ))}
+            {cookingTasks.length === 0 && <p className="text-gray-400 text-xs">No active cooking duties.</p>}
+        </div>
+      </div>
+
+      {/* Garbage Section */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+        <div className="flex items-center gap-2 mb-3 text-red-500">
+           <Trash2 size={20} />
+           <h3 className="font-bold text-lg">Garbage Duty</h3>
+        </div>
+        
+        <form onSubmit={handleAdd} className="flex gap-2 mb-4">
+            <input 
+              placeholder="Who takes trash out?" 
+              value={newItem} 
+              onChange={e => {setNewItem(e.target.value); setTaskType('garbage');}}
+              className="flex-1 p-2 border rounded-lg text-sm"
+              onFocus={() => setTaskType('garbage')}
+            />
+            <select 
+                value={assignee} onChange={e => setAssignee(e.target.value)}
+                className="w-24 p-2 border rounded-lg text-sm"
+            >
+                <option value="">Who?</option>
+                {members.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+            </select>
+            <button type="submit" onClick={() => setTaskType('garbage')} className="bg-red-500 text-white p-2 rounded-lg">
+                <Plus size={20}/>
+            </button>
+        </form>
+
+        <div className="space-y-2">
+            {garbageTasks.map(task => (
+                <div key={task.id} className="flex justify-between items-center bg-red-50 p-3 rounded text-red-900 text-sm">
+                    <div className="flex flex-col">
+                        <span className="font-medium">{task.title}</span>
+                        {task.assignee && <span className="text-xs text-red-600">Assigned: {task.assignee}</span>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                        {task.assignee && (
+                            <button onClick={() => handleNotify(task)} className="text-red-400 hover:text-red-600 bg-white p-1 rounded-full shadow-sm">
+                                <Bell size={14}/>
+                            </button>
+                         )}
+                        <button onClick={() => onDeleteTask(task.id)} className="text-red-300 hover:text-red-600"><X size={16}/></button>
+                    </div>
+                </div>
+            ))}
+            {garbageTasks.length === 0 && <p className="text-gray-400 text-xs">No active duties.</p>}
+        </div>
+      </div>
+
+      {/* Veg Section */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+        <div className="flex items-center gap-2 mb-3 text-green-600">
+           <ShoppingCart size={20} />
+           <h3 className="font-bold text-lg">Vegetable List</h3>
+        </div>
+
+        <div className="flex flex-col gap-2 mb-4">
+             <div className="flex gap-2">
+                <input 
+                placeholder="What to buy?" 
+                value={newItem} 
+                onChange={e => {setNewItem(e.target.value); setTaskType('veg');}}
+                className="flex-1 p-2 border rounded-lg text-sm"
+                onFocus={() => setTaskType('veg')}
+                />
+                <input 
+                  type="number"
+                  placeholder="₹" 
+                  value={price} 
+                  onChange={e => setPrice(e.target.value)}
+                  className="w-16 p-2 border rounded-lg text-sm"
+                  onFocus={() => setTaskType('veg')}
+                />
+                <select 
+                    value={assignee} onChange={e => setAssignee(e.target.value)}
+                    className="w-24 p-2 border rounded-lg text-sm"
+                >
+                    <option value="">Who?</option>
+                    {members.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+                </select>
+            </div>
+            <button onClick={(e) => {setTaskType('veg'); handleAdd(e);}} className="w-full bg-green-600 text-white py-2 rounded-lg text-sm font-medium">Add to List</button>
+        </div>
+
+        <ul className="space-y-2">
+            {vegTasks.map(task => (
+                <li key={task.id} className="flex justify-between items-center bg-green-50 p-3 rounded text-green-900 border border-green-100">
+                    <div className="flex flex-col">
+                        <div className="flex items-center gap-2">
+                            <span className="font-medium">{task.title}</span>
+                            {task.price && <span className="text-xs font-bold bg-green-200 text-green-800 px-1.5 py-0.5 rounded">₹{task.price}</span>}
+                        </div>
+                        {task.assignee && <span className="text-xs text-green-600">Bring by: {task.assignee}</span>}
+                    </div>
+                    <button onClick={() => onDeleteTask(task.id)} className="text-green-400 hover:text-green-700"><X size={16}/></button>
+                </li>
+            ))}
+            {vegTasks.length === 0 && <p className="text-gray-400 text-xs">List is empty.</p>}
+        </ul>
+      </div>
+
+      <div className="flex justify-between items-center mt-4">
+         <button 
+            onClick={() => setIsHistoryOpen(true)}
+            className="p-1 text-gray-400 hover:text-indigo-600 transition-colors bg-white rounded-full shadow-sm border border-gray-100"
+            title="View Past Task History"
+         >
+            <History size={20}/>
+         </button>
+
+         {isManager && tasks.length > 0 && (
+             <button 
+                onClick={() => setShowClearConfirm(true)}
+                className="text-xs font-bold text-red-500 hover:text-red-700 bg-red-50 px-3 py-1 rounded-full border border-red-100 flex items-center gap-1"
+             >
+               <Trash2 size={12}/> Clear & Archive
+             </button>
+         )}
+      </div>
+
+      <ConfirmModal 
+        isOpen={showClearConfirm}
+        title="Clear All Tasks?"
+        message="This will save current lists to History and then clear them. This cannot be undone."
+        onCancel={() => setShowClearConfirm(false)}
+        onConfirm={() => {
+            onClearTasks();
+            setShowClearConfirm(false);
+        }}
+      />
+      
+      <SMSModal 
+        isOpen={smsModalOpen}
+        onClose={() => setSmsModalOpen(false)}
+        members={members}
+        messageBody={notifyMsg}
+        preSelectedPhone={notifyPhone}
+      />
+
+      <HistoryModal 
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        historyItems={history}
+        title="Task History"
+        type="tasks"
+      />
+    </div>
+  );
+};
+
+// --- Main App Component ---
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [roomCode, setRoomCode] = useState(() => localStorage.getItem('roommate_app_code') || '');
+  const [userName, setUserName] = useState(() => localStorage.getItem('roommate_app_name') || '');
+  const [userEmail, setUserEmail] = useState(() => localStorage.getItem('roommate_app_email') || '');
+  const [activeTab, setActiveTab] = useState('home');
+  const [viewState, setViewState] = useState('entry'); // entry, waiting, active
+  const [isChecking, setIsChecking] = useState(false);
+  const [isManager, setIsManager] = useState(false);
+  const [roomNameDisplay, setRoomNameDisplay] = useState('RoomieSync'); // Stores the fetched room name
+  
+  // Data State
+  const [members, setMembers] = useState([]);
+  const [expenses, setExpenses] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [requests, setRequests] = useState([]);
+  const [notices, setNotices] = useState([]);
+  const [history, setHistory] = useState([]); // Stores fetched history
+  const [rentDate, setRentDate] = useState('1');
+  const [alarmTime, setAlarmTime] = useState('');
+
+  // 1. Authentication
+  useEffect(() => {
+    const initAuth = async () => {
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        await signInWithCustomToken(auth, __initial_auth_token);
+      } else {
+        await signInAnonymously(auth);
+      }
+    };
+    initAuth();
+    
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // 2. Logic to determine access status
+  useEffect(() => {
+    if (!user || !roomCode) {
+      setViewState('entry');
+      return;
+    }
+
+    const checkAccess = async () => {
+      const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', roomCode);
+      const requestRef = doc(db, 'artifacts', appId, 'public', 'data', 'requests', `${roomCode}_${user.uid}`);
+      
+      const unsubRequest = onSnapshot(requestRef, (reqSnap) => {
+        const reqData = reqSnap.data();
+        if (reqData && reqData.status === 'approved') {
+          setViewState('active');
+        } else if (reqData && reqData.status === 'pending') {
+          setViewState('waiting');
+        }
+      });
+      
+      const unsubSettings = onSnapshot(roomRef, (snap) => {
+        if (!snap.exists()) {
+           // Room creator logic handled in join
+        } else {
+           const data = snap.data();
+           if (data.managerId === user.uid) {
+             setIsManager(true);
+             setViewState('active');
+           }
+        }
+      });
+      
+      return () => {
+        unsubRequest();
+        unsubSettings();
+      };
+    };
+
+    checkAccess();
+  }, [user, roomCode]);
+
+
+  // 3. Data Fetching
+  useEffect(() => {
+    if (!user || !roomCode || viewState !== 'active') return;
+
+    const qMembers = query(collection(db, 'artifacts', appId, 'public', 'data', 'members'), where('roomId', '==', roomCode));
+    const qExpenses = query(collection(db, 'artifacts', appId, 'public', 'data', 'expenses'), where('roomId', '==', roomCode));
+    const qTasks = query(collection(db, 'artifacts', appId, 'public', 'data', 'tasks'), where('roomId', '==', roomCode));
+    const qNotices = query(collection(db, 'artifacts', appId, 'public', 'data', 'notices'), where('roomId', '==', roomCode));
+    const qHistory = query(collection(db, 'artifacts', appId, 'public', 'data', 'history'), where('roomId', '==', roomCode), orderBy('archivedAt', 'desc'));
+    
+    const unsubMembers = onSnapshot(qMembers, 
+      (snapshot) => setMembers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
+      (err) => console.error("Members err", err)
+    );
+
+    const unsubExpenses = onSnapshot(qExpenses, 
+      (snapshot) => setExpenses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
+      (err) => console.error("Expenses err", err)
+    );
+
+    const unsubTasks = onSnapshot(qTasks, 
+      (snapshot) => setTasks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
+      (err) => console.error("Tasks err", err)
+    );
+
+    const unsubNotices = onSnapshot(qNotices, 
+      (snapshot) => setNotices(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
+      (err) => console.error("Notices err", err)
+    );
+
+    const unsubHistory = onSnapshot(qHistory, 
+      (snapshot) => setHistory(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
+      (err) => console.error("History err", err)
+    );
+
+    const unsubSettings = onSnapshot(
+        doc(db, 'artifacts', appId, 'public', 'data', 'settings', roomCode),
+        (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                setRentDate(data.rentDate);
+                setAlarmTime(data.alarmTime || '');
+                if(data.roomName) setRoomNameDisplay(data.roomName);
+                if(data.managerId === user.uid) setIsManager(true);
+            }
+        },
+        (err) => console.error("Settings err", err)
+    );
+
+    let unsubRequests = () => {};
+    if (isManager) {
+        const qRequests = query(
+          collection(db, 'artifacts', appId, 'public', 'data', 'requests'), 
+          where('roomId', '==', roomCode),
+          where('status', '==', 'pending')
+        );
+        unsubRequests = onSnapshot(qRequests, (snap) => {
+          setRequests(snap.docs.map(d => ({id: d.id, ...d.data()})));
+        });
+    }
+
+    return () => {
+      unsubMembers();
+      unsubExpenses();
+      unsubTasks();
+      unsubNotices();
+      unsubSettings();
+      unsubRequests();
+      unsubHistory();
+    };
+  }, [user, roomCode, viewState, isManager]);
+
+  // --- Handlers ---
+  const handleJoinRoom = async (code, name, email, enteredRoomName) => {
+    if (!user) return;
+    setIsChecking(true);
+    
+    localStorage.setItem('roommate_app_code', code);
+    localStorage.setItem('roommate_app_name', name);
+    localStorage.setItem('roommate_app_email', email);
+    setRoomCode(code);
+    setUserName(name);
+    setUserEmail(email);
+
+    const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', code);
+    const settingsSnap = await getDoc(settingsRef);
+
+    if (!settingsSnap.exists()) {
+      await setDoc(settingsRef, { 
+        roomId: code, 
+        roomName: enteredRoomName || "RoomieSync", 
+        managerId: user.uid, 
+        rentDate: '1',
+        createdAt: new Date().toISOString()
+      });
+      
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'members'), {
+        name: name,
+        email: email,
+        roomId: code,
+        isManager: true,
+        userId: user.uid,
+        joinedAt: new Date().toISOString()
+      });
+
+      setIsManager(true);
+      setViewState('active');
+    } else {
+      const data = settingsSnap.data();
+      if (data.managerId === user.uid) {
+        setIsManager(true);
+        setViewState('active');
+      } else {
+        const reqRef = doc(db, 'artifacts', appId, 'public', 'data', 'requests', `${code}_${user.uid}`);
+        const reqSnap = await getDoc(reqRef);
+        
+        if (reqSnap.exists() && reqSnap.data().status === 'approved') {
+           setViewState('active');
+        } else {
+           await setDoc(reqRef, {
+             roomId: code,
+             userId: user.uid,
+             userName: name,
+             userEmail: email,
+             status: 'pending',
+             timestamp: new Date().toISOString()
+           });
+           setViewState('waiting');
+        }
+      }
+    }
+    setIsChecking(false);
+  };
+
+  const handleLeaveRoom = () => {
+    setRoomCode('');
+    localStorage.removeItem('roommate_app_code');
+    localStorage.removeItem('roommate_app_name');
+    localStorage.removeItem('roommate_app_email');
+    setMembers([]);
+    setExpenses([]);
+    setTasks([]);
+    setNotices([]);
+    setHistory([]);
+    setViewState('entry');
+    setIsManager(false);
+    setRoomNameDisplay('RoomieSync');
+  };
+
+  const approveRequest = async (req) => {
+    if(!isManager) return;
+    const reqRef = doc(db, 'artifacts', appId, 'public', 'data', 'requests', req.id);
+    await updateDoc(reqRef, { status: 'approved' });
+    
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'members'), {
+      name: req.userName,
+      email: req.userEmail,
+      roomId: req.roomId,
+      userId: req.userId,
+      joinedAt: new Date().toISOString()
+    });
+  };
+
+  const rejectRequest = async (reqId) => {
+    if(!isManager) return;
+    const reqRef = doc(db, 'artifacts', appId, 'public', 'data', 'requests', reqId);
+    await deleteDoc(reqRef);
+  };
+
+  const addMember = async (memberData) => {
+    if(!user || !roomCode) return;
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'members'), { ...memberData, roomId: roomCode });
+  };
+
+  const deleteMember = async (id) => {
+    if(!user) return;
+    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'members', id));
+  };
+
+  const addExpense = async (data) => {
+    if(!user || !roomCode) return;
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'expenses'), { ...data, roomId: roomCode });
+  };
+
+  const deleteExpense = async (id) => {
+    if(!user) return;
+    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'expenses', id));
+  };
+
+  const archiveAndClearExpenses = async () => {
+      if(!user || !roomCode || !isManager) return;
+      const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'expenses'), where('roomId', '==', roomCode));
+      const snapshot = await getDocs(q);
+      
+      if (snapshot.empty) return;
+
+      const batch = writeBatch(db);
+      
+      // 1. Create Archive Record
+      const items = snapshot.docs.map(d => d.data());
+      const total = items.reduce((acc, curr) => acc + Number(curr.amount), 0);
+      
+      const historyRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'history'));
+      batch.set(historyRef, {
+          roomId: roomCode,
+          type: 'expenses',
+          archivedAt: new Date().toISOString(),
+          archivedBy: user.uid,
+          total: total,
+          items: items
+      });
+
+      // 2. Delete existing
+      snapshot.docs.forEach((doc) => {
+          batch.delete(doc.ref);
+      });
+      
+      await batch.commit();
+  };
+
+  const addTask = async (data) => {
+    if(!user || !roomCode) return;
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'tasks'), { ...data, roomId: roomCode });
+  };
+
+  const deleteTask = async (id) => {
+    if(!user) return;
+    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tasks', id));
+  };
+
+  const archiveAndClearTasks = async () => {
+      if(!user || !roomCode || !isManager) return;
+      const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'tasks'), where('roomId', '==', roomCode));
+      const snapshot = await getDocs(q);
+      
+      if (snapshot.empty) return;
+
+      const batch = writeBatch(db);
+      
+      // 1. Create Archive Record
+      const items = snapshot.docs.map(d => d.data());
+      
+      const historyRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'history'));
+      batch.set(historyRef, {
+          roomId: roomCode,
+          type: 'tasks',
+          archivedAt: new Date().toISOString(),
+          archivedBy: user.uid,
+          items: items
+      });
+
+      snapshot.docs.forEach((doc) => {
+          batch.delete(doc.ref);
+      });
+      await batch.commit();
+  };
+
+  const addNotice = async (data) => {
+      if(!user || !roomCode) return;
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'notices'), { ...data, roomId: roomCode });
+  };
+
+  const deleteNotice = async (id) => {
+      if(!user) return;
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'notices', id));
+  };
+
+  const updateRentDate = async (val) => {
+      if(!user || !roomCode || !isManager) return;
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', roomCode);
+      await setDoc(docRef, { rentDate: val, roomId: roomCode }, { merge: true });
+      setRentDate(val);
+  };
+
+  const updateAlarmTime = async (val) => {
+      if(!user || !roomCode) return;
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', roomCode);
+      await setDoc(docRef, { alarmTime: val, roomId: roomCode }, { merge: true });
+      setAlarmTime(val);
+  };
+
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="animate-pulse flex flex-col items-center">
+          <Home className="text-indigo-600 mb-4" size={48} />
+          <p className="text-gray-500">Opening your room...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (viewState === 'entry') {
+    return <RoomEntry onJoin={handleJoinRoom} isChecking={isChecking} />;
+  }
+
+  if (viewState === 'waiting') {
+    return <WaitingScreen onLeave={handleLeaveRoom} />;
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 font-sans text-gray-900 max-w-md mx-auto shadow-2xl overflow-hidden relative">
+      
+      {/* Header */}
+      <div className="bg-white px-6 pt-12 pb-4 shadow-sm z-10 sticky top-0">
+        <div className="flex justify-between items-center">
+          <div>
+            <h1 className="text-2xl font-extrabold text-indigo-900 tracking-tight truncate max-w-[200px]">{roomNameDisplay}</h1>
+            <div className="flex items-center gap-2">
+               <p className="text-xs text-indigo-400 font-medium tracking-wide uppercase">Code: {roomCode}</p>
+               {isManager && <span className="bg-indigo-100 text-indigo-700 text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1"><ShieldCheck size={10}/> ADMIN</span>}
+            </div>
+          </div>
+          
+          {activeTab === 'home' ? (
+            <button 
+              onClick={handleLeaveRoom}
+              className="h-8 w-8 bg-gray-100 rounded-full flex items-center justify-center text-gray-500 hover:bg-red-100 hover:text-red-500 transition-colors"
+              title="Leave Room"
+            >
+              <LogOut size={16} />
+            </button>
+          ) : (
+             <button 
+              onClick={() => setActiveTab('home')}
+              className="h-8 w-8 bg-gray-100 rounded-full flex items-center justify-center text-gray-500 hover:bg-indigo-100 hover:text-indigo-600 transition-colors"
+              title="Back to Home"
+            >
+              <ChevronLeft size={20} />
+            </button>
+          )}
+
+        </div>
+      </div>
+
+      {/* Content Area */}
+      <div className="p-4 h-[calc(100vh-160px)] overflow-y-auto">
+        {activeTab === 'home' && (
+          <Tasks 
+            tasks={tasks} 
+            notices={notices}
+            members={members} 
+            history={history.filter(h => h.type === 'tasks')}
+            isManager={isManager}
+            onAddTask={addTask} 
+            onDeleteTask={deleteTask}
+            onClearTasks={archiveAndClearTasks}
+            onAddNotice={addNotice}
+            onDeleteNotice={deleteNotice}
+            rentDate={rentDate}
+            onUpdateRentDate={updateRentDate}
+            alarmTime={alarmTime}
+            onSetAlarm={updateAlarmTime}
+          />
+        )}
+        {activeTab === 'money' && (
+          <Expenses 
+            expenses={expenses} 
+            members={members} 
+            history={history.filter(h => h.type === 'expenses')}
+            isManager={isManager}
+            onAddExpense={addExpense}
+            onDeleteExpense={deleteExpense}
+            onClearExpenses={archiveAndClearExpenses}
+          />
+        )}
+        {activeTab === 'members' && (
+          <Members 
+            members={members} 
+            requests={requests}
+            isManager={isManager}
+            onAddMember={addMember} 
+            onDeleteMember={deleteMember}
+            onApproveRequest={approveRequest}
+            onRejectRequest={rejectRequest}
+          />
+        )}
+      </div>
+
+      {/* Bottom Navigation */}
+      <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-6 py-4 flex justify-between items-center z-20">
+        <button 
+          onClick={() => setActiveTab('home')}
+          className={`flex flex-col items-center gap-1 ${activeTab === 'home' ? 'text-indigo-600' : 'text-gray-400'}`}
+        >
+          <Home size={24} strokeWidth={activeTab === 'home' ? 3 : 2} />
+          <span className="text-[10px] font-bold">Home</span>
+        </button>
+
+        <button 
+          onClick={() => setActiveTab('money')}
+          className={`flex flex-col items-center gap-1 ${activeTab === 'money' ? 'text-emerald-600' : 'text-gray-400'}`}
+        >
+          <DollarSign size={24} strokeWidth={activeTab === 'money' ? 3 : 2} />
+          <span className="text-[10px] font-bold">Money</span>
+        </button>
+
+        <button 
+          onClick={() => setActiveTab('members')}
+          className={`flex flex-col items-center gap-1 ${activeTab === 'members' ? 'text-pink-600' : 'text-gray-400'}`}
+        >
+          <Users size={24} strokeWidth={activeTab === 'members' ? 3 : 2} />
+          <span className="text-[10px] font-bold">Roomies</span>
+        </button>
+      </div>
+
+    </div>
+  );
+}
